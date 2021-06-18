@@ -54,10 +54,10 @@ enum struct SoundStruct {
 }
 
 ConVar CvarEnabled;
-ConVar CvarSoundLimit;
+ConVar CvarClientLimit;
 ConVar CvarDonorLimit;
 ConVar CvarAdminLimit;
-ConVar CvarSoundDelay;
+ConVar CvarClientDelay;
 ConVar CvarDonorDelay;
 ConVar CvarAdminDelay;
 ConVar CvarRound;
@@ -194,6 +194,20 @@ methodmap BasePlayer {
 			m_hPlayerFields[this.index].SetFloatValue("fSoundLastTime", f);
 		}
 	}
+
+	public DisplayRemainingSounds() {
+		switch(this.iAccessType) {
+			case SAYSOUND_CLIENT:
+				if(CvarClientLimit.IntValue && IsValidClient(this.index))
+					PrintToChat(this.index, "[SM] You have used %d/%d sounds", this.iSoundCount, CvarClientLimit.IntValue);
+			case SAYSOUND_DONOR:
+				if(CvarDonorLimit.FloatValue && IsValidClient(this.index))
+					PrintToChat(this.index, "[SM] You have used %d/%d sounds", this.iSoundCount, CvarDonorLimit.IntValue);
+			case SAYSOUND_ADMIN:
+				if(CvarAdminLimit.FloatValue && IsValidClient(this.index))
+					PrintToChat(this.index, "[SM] You have used %d/%d sounds", this.iSoundCount, CvarAdminLimit.IntValue);
+		}
+	}
 }
 
 public void OnPluginStart() {
@@ -208,11 +222,11 @@ public void OnPluginStart() {
 
 	CvarEnabled = CreateConVar("sm_saysounds_enable","1","Turns Sounds On/Off", FCVAR_PLUGIN, true, 0.0, true, 1.0);
 	
-	CvarSoundLimit = CreateConVar("sm_saysounds_sound_limit","10","Maximum sounds per person (0 for unlimited)", FCVAR_PLUGIN, true, 0.0, false, 0.0);
+	CvarClientLimit = CreateConVar("sm_saysounds_sound_limit","10","Maximum sounds per person (0 for unlimited)", FCVAR_PLUGIN, true, 0.0, false, 0.0);
 	CvarDonorLimit = CreateConVar("sm_saysounds_donor_limit","15","Maximum sounds for saysounds_donor (0 for unlimited)", FCVAR_PLUGIN, true, 0.0, false, 0.0);
 	CvarAdminLimit = CreateConVar("sm_saysounds_admin_limit","0","Maximum sounds per saysounds_admin (0 for unlimited)", FCVAR_PLUGIN, true, 0.0, false, 0.0);
 
-	CvarSoundDelay = CreateConVar("sm_saysounds_sound_delay","5.0","Time between each sound trigger, 0.0 to disable checking", FCVAR_PLUGIN, true, 0.0, false, 0.0);
+	CvarClientDelay = CreateConVar("sm_saysounds_sound_delay","5.0","Time between each sound trigger, 0.0 to disable checking", FCVAR_PLUGIN, true, 0.0, false, 0.0);
 	CvarDonorDelay = CreateConVar("sm_saysounds_donor_delay","3.0","User flags to bypass the Time between sounds check", FCVAR_PLUGIN, true, 0.0, false, 0.0);
 	CvarAdminDelay = CreateConVar("sm_saysounds_admin_delay","1.0","User flags to bypass the Time between sounds check", FCVAR_PLUGIN, true, 0.0, false, 0.0);
 
@@ -251,10 +265,10 @@ public void OnPluginStart() {
 
 	HookEvent("teamplay_round_start", Event_RoundStart);
 
-	Handle topmenu;
+	/*Handle topmenu;
 	if (LibraryExists("adminmenu") && ((topmenu = GetAdminTopMenu()) != INVALID_HANDLE)) {
 		OnAdminMenuReady(topmenu);
-	}
+	}*/
 
 	PrepareSounds();
 	
@@ -321,28 +335,25 @@ public void Cvar_PlayIngameChanged(ConVar convar, const char[] oldValue, const c
 
 public void PrecacheSounds() {
 	char soundfile[PLATFORM_MAX_PATH];
-	char buffer[PLATFORM_MAX_PATH];
-	Handle hpath;
-	int flags;
-	
-	for(int i = GetArraySize(gh_paths) - 1; i >= 0; i--) {
-		hpath = GetArrayCell(gh_paths, i);
-		flags = GetArrayCell(gh_flags, i);
-
-		for(int j = GetArraySize(hpath) - 1; j >= 0; j--) {
-			GetArrayString(hpath, k, soundfile, sizeof(soundfile));
-			if(gb_playingame) {
+	for(int i; i < m_aSoundList.Length; i++) {
+		SoundStruct sound;
+		sound = m_aSoundList.Get(i);
+		ArrayList paths = sound.paths;
+		for(int j; j < paths.Length; j++) {
+			paths.GetString(j, soundfile, sizeof(soundfile));
+			if(CvarPlayIngame.BoolValue) {
 				if(bLameSoundEngine)
 					AddToStringTable(FindStringTable("soundprecache"), soundfile);
 				else
 					PrecacheSound(soundfile, true);
 			}
 
-			if(flags & SAYSOUND_FLAG_DOWNLOAD) {
-				FormatEx(buffer, sizeof(buffer), "sound/%s", soundfile);
-				AddFileToDownloadsTable(buffer);
+			if(sound.flags & SAYSOUND_FLAG_DOWNLOAD) {
+				FormatEx(soundfile, sizeof(soundfile), "sound/%s", soundfile);
+				AddFileToDownloadsTable(soundfile);
 			}
 		}
+		delete paths;
 	}
 }
 
@@ -373,7 +384,7 @@ public void PrepareSounds() {
 
 					char trigger[SAYSOUND_TRIGGER_SIZE];
 					kv.GetSectionName(trigger, sizeof(trigger));
-					FormatEx(path.trigger, trigger, sizeof(trigger);
+					FormatEx(path.trigger, sizeof(path.trigger), "%s", trigger);
 
 					if(kv.GetNum("admin", 0)) {
 						file.flags |= SAYSOUND_FLAG_ADMIN;
@@ -401,7 +412,7 @@ public void PrepareSounds() {
 
 					ArrayList pathList = new ArrayList();
 					if(bLameSoundEngine)
-						FormatEx(filelocation, sizeof(filelocation), "*%s", filelocation);	// prefix asterisk for newer games
+						FormatEx(filelocation, sizeof(filelocation), "*%s", filelocation);	/// prefix asterisk for newer games
 					pathList.Push(filelocation);
 
 					for(int i = 2; i; i++) {
@@ -416,6 +427,7 @@ public void PrepareSounds() {
 						pathList.Push(filelocation);
 					}
 					file.paths = pathList;
+					delete pathList;
 					m_aSoundList.Push(file);
 				}
 			}
@@ -445,23 +457,20 @@ public Action Timer_WaitForAdminCacheReload(Handle timer) {
 }
 
 public Action Command_Say(int client, const char[] command, int argc) {
-	static char speech[256];
-	static startidx;
+	BasePlayer player = BasePlayer(client);
+	char speech[256];
+	int startidx;
 
-	if(gb_enabled && !g_clientprefs[client][SAYSOUND_PREF_DISABLED] && !g_clientprefs[client][SAYSOUND_PREF_BANNED])		// enabled, they can emit sounds to others
-	{
-		if (GetCmdArgString(speech, sizeof(speech)) >= 1)
-		{
+	if(CvarEnabled.BoolValue && !player.bSoundDisabled && !player.bSoundBanned)	{	/// enabled, they can emit sounds to others
+		if (GetCmdArgString(speech, sizeof(speech)) >= 1) {
 			startidx = 0;
 			
-			if (speech[strlen(speech)-1] == '"')
-			{
+			if(speech[strlen(speech)-1] == '"') {
 				speech[strlen(speech)-1] = '\0';
 				startidx = 1;
 			}
 
-			if (strcmp(command, "say2", false) == 0)
-			{
+			if(!strcmp(command, "say2", false)) {
 				startidx += 4;
 			}
 
@@ -472,145 +481,132 @@ public Action Command_Say(int client, const char[] command, int argc) {
 }
 
 public Action AttemptSaySound(int client, char[] sound) {
-	static char buffer[PLATFORM_MAX_PATH];
-	static size, flags;
-	static Handle hpath;
+	char buffer[PLATFORM_MAX_PATH];
 
-	if(g_saysound_limit[g_access[client]])																			// is there a limit, are they at it
-	{
-		if(g_soundcount[client] >= g_saysound_limit[g_access[client]])
-		{
+	BasePlayer player = BasePlayer(client);
+
+	switch(player.iAccessType) {
+		case SAYSOUND_CLIENT:
+			if(player.iSoundCount >= CvarClientLimit.IntValue)
+				return Plugin_Continue;
+		case SAYSOUND_DONOR:
+			if(player.iSoundCount >= CvarDonorLimit.IntValue)
+				return Plugin_Continue;
+		case SAYSOUND_ADMIN:
+			if(player.iSoundCount >= CvarAdminLimit.IntValue)
+				return Plugin_Continue;
+		default:
 			return Plugin_Continue;
-		}
 	}
 
-	float time = GetEngineTime();																							// are they experiencing delay
-	if(time > gf_LastSaysound[client])
-	{
+	float time = GetEngineTime();	/// are they experiencing delay
+	if(time > player.fSoundLastTime) {
 		bool adminonly;
 
-		size = GetArraySize(gh_paths);																				// traverse forward
-		for(int i; i < size; i++)
-		{
-			GetArrayString(gh_trigger, i, buffer, sizeof(buffer));
-			if((gb_saysound_sentence && StrContains(sound, buffer, false) >= 0) || strcmp(sound, buffer, false) == 0)
-			{
-				flags = GetArrayCell(gh_flags, i);
-				if((flags & SAYSOUND_FLAG_ADMIN) && g_access[client] != SAYSOUND_ADMIN)
-				{
+		for(int i; i < m_aSoundList.Length; i++) {
+			SoundStruct soundfile;
+			soundfile = m_aSoundList.Get(i);
+			if((CvarSentence.BoolValue && StrContains(sound, soundfile.trigger, false) >= 0) || !strcmp(sound, soundfile.trigger, false)) {
+				if((soundfile.flags & SAYSOUND_FLAG_ADMIN) && player.iAccessType != SAYSOUND_ADMIN) {
 					adminonly = true;
-
-					continue;																					// perhaps there is something similar they can use
+					continue;	/// perhaps there is something similar they can use
 				}
 
-				if(gb_preventspam[g_access[client]])
-				{
-					if(FindValueInArray(gh_recentsounds, i) != -1)
-					{
-						if(client && IsClientInGame(client))
-						{
-							PrintToChat(client, "[SM] this sound was recently played");
-						}
-						return Plugin_Continue;
-					}
+				switch(player.iAccessType) {
+					case SAYSOUND_CLIENT:
+						if(CvarExcludeClient.BoolValue)
+							if(m_aRecentSounds.FindValue(i) != -1)
+								if(IsValidClient(client))
+									PrintToChat(client, "[SM] This sound was recently played");
+								return Plugin_Continue;
+					case SAYSOUND_DONOR:
+						if(CvarExcludeDonor.BoolValue)
+							if(m_aRecentSounds.FindValue(i) != -1)
+								if(IsValidClient(client))
+									PrintToChat(client, "[SM] This sound was recently played");
+								return Plugin_Continue;
+					case SAYSOUND_ADMIN:
+						if(CvarExcludeAdmin.BoolValue)
+							if(m_aRecentSounds.FindValue(i) != -1)
+								if(IsValidClient(client))
+									PrintToChat(client, "[SM] This sound was recently played");
+								return Plugin_Continue;
 				}
 
-				hpath = GetArrayCell(gh_paths, i);
-				GetArrayString(hpath, GetRandomInt(0, GetArraySize(hpath)-1), buffer, sizeof(buffer));
+				ArrayList paths = soundfile.paths;
+				paths.GetString(GetRandomInt(0, paths.Length-1), buffer, sizeof(buffer));
+				delete paths;
 
-				DoSaySound(buffer, (flags & SAYSOUND_FLAG_CUSTOMVOLUME) ? (float GetArrayCell(gh_volume, i)) : CvarVolume.FloatValue);
+				DoSaySound(buffer, (flags & SAYSOUND_FLAG_CUSTOMVOLUME) ? soundfile.volume : CvarVolume.FloatValue);
 
-				if(PushArrayCell(gh_recentsounds, i) >= g_saysound_excludecount)
-				{
-					RemoveFromArray(gh_recentsounds, 0);
-				}
+				if(m_aRecentSounds.Push(i) >= CvarExclude.IntValue)
+					m_aRecentSounds.Remove(0);
 
-				if(gf_saysound_delay[g_access[client]])
-				{
-					if(flags & SAYSOUND_FLAG_CUSTOMLENGTH)
-					{
-						gf_LastSaysound[client] = time + float GetArrayCell(gh_length, i);
-					}
-					else
-					{
-						gf_LastSaysound[client] = time + gf_saysound_delay[g_access[client]];
-					}
+				switch(player.iAccessType) {
+					case SAYSOUND_CLIENT:
+						if(CvarClientDelay.FloatValue)
+							if(soundfile.flags & SAYSOUND_FLAG_CUSTOMLENGTH)
+								player.fSoundLastTime = time + soundfile.length;
+							else
+								player.fSoundLastTime = time + CvarClientDelay.FloatValue;
+					case SAYSOUND_DONOR:
+						if(CvarDonorDelay.FloatValue)
+							if(soundfile.flags & SAYSOUND_FLAG_CUSTOMLENGTH)
+								player.fSoundLastTime = time + soundfile.length;
+							else
+								player.fSoundLastTime = time + CvarClientDelay.FloatValue;
+					case SAYSOUND_ADMIN:
+						if(CvarAdminDelay.FloatValue)
+							if(soundfile.flags & SAYSOUND_FLAG_CUSTOMLENGTH)
+								player.fSoundLastTime = time + soundfile.length;
+							else
+								player.fSoundLastTime = time + CvarClientDelay.FloatValue;
 				}
 				
-				g_soundcount[client]++;
-				DisplayRemainingSounds(client);
+				player.iSoundCount++;
+				player.DisplayRemainingSounds();
 				
-				if(gb_saysound_blocktrigger)
-				{
+				if(CvarBlockTrigger.BoolValue)
 					return Plugin_Handled;
-				}
 
 				return Plugin_Continue;
 			}
 		}
 		
 		if(adminonly)
-		{
-			if(client && IsClientInGame(client))
-			{
-				PrintToChat(client, "[SM] you do not have access to this sound");
-			}
+			if(IsValidClient(client))
+				PrintToChat(client, "[SM] You do not have access to this sound");
 		}
 	}
 
 	return Plugin_Continue;
 }
 
-DisplayRemainingSounds(int client)
-{
-	if(g_saysound_limit[g_access[client]])
-	{
-		if(client && IsClientInGame(client))
-		{
-			PrintToChat(client, "[SM] you have used %d/%d sounds", g_soundcount[client], g_saysound_limit[g_access[client]]);
-		}
-	}
-}
-
-DoSaySound(char[] soundfile, float volume)
-{
-	for(int target = 1; target<=MaxClients; target++)
-	{
-		if(IsClientInGame(target) && !g_clientprefs[target][SAYSOUND_PREF_DISABLED])
-		{
-			if(gb_playingame)
-			{
-				if(volume > 1.0)
-				{
+public void DoSaySound(char[] soundfile, float volume) {
+	for(int target = MaxClients; target; target--) {
+		if(IsValidClient(target) && !BasePlayer(target).bSoundDisabled) {
+			if(CvarPlayIngame.BoolValue) {
+				if(volume > 1.0) {
 					volume *= 0.5;
 					EmitSoundToClient(target, soundfile, .volume = volume);
 					EmitSoundToClient(target, soundfile, .volume = volume);
 				}
 				else
-				{
 					EmitSoundToClient(target, soundfile, .volume = volume);
-				}
 			}
-			else
-			{
+			else {
 				if(volume >= 2.0)
-				{
-					ClientCommand(target, "playgamesound \"%s\";playgamesound \"%s\"", soundfile,soundfile);
-				}
+					ClientCommand(target, "playgamesound \"%s\";playgamesound \"%s\"", soundfile, soundfile);
 				else
-				{
-					ClientCommand(target, "playgamesound \"%s\"",soundfile);
-				}
+					ClientCommand(target, "playgamesound \"%s\"", soundfile);
 			}
 		}
 	}
 }
 
-public Action Command_Sound_Reset(int client, int args)
-{
-	if (args < 1)
-	{
-		ReplyToCommand(client, "[sm] usage: sm_sound_reset <target>");
+public Action Command_Sound_Reset(int client, int args) {
+	if(args < 1) {
+		ReplyToCommand(client, "[SM] Usage: sm_sound_reset <target>");
 		return Plugin_Handled;
 	}
 
@@ -620,27 +616,22 @@ public Action Command_Sound_Reset(int client, int args)
 	char name[64];
 	bool isml,clients[MAXPLAYERS+1];
 	int count=ProcessTargetString(arg,client,clients,MAXPLAYERS+1,COMMAND_FILTER_CONNECTED|COMMAND_FILTER_NO_BOTS,name,sizeof(name),isml);
-	if (count > 0)
-	{
-		for(int x=0;x<count;x++)
-		{
+	if(count > 0) {
+		for(int x=0;x<count;x++) {
 			g_soundcount[clients[x]] = 0;
 			DisplayRemainingSounds(clients[x]);
 		}
 	}
-	else
-	{
+	else {
 		ReplyToTargetError(client, count);
 	}
 
 	return Plugin_Handled;
 }
 
-public Action Command_Sound_Ban(int client, int args)
-{
-	if (args < 1)
-	{
-		ReplyToCommand(client, "[sm] usage: sm_sound_ban <target>");
+public Action Command_Sound_Ban(int client, int args) {
+	if (args < 1) {
+		ReplyToCommand(client, "[SM] Usage: sm_sound_ban <target>");
 		return Plugin_Handled;	
 	}
 
@@ -650,64 +641,22 @@ public Action Command_Sound_Ban(int client, int args)
 	char name[64];
 	bool isml,clients[MAXPLAYERS+1];
 	int count=ProcessTargetString(arg,client,clients,MAXPLAYERS+1,COMMAND_FILTER_CONNECTED|COMMAND_FILTER_NO_BOTS|COMMAND_FILTER_NO_MULTI,name,sizeof(name),isml);
-	if (count == 1)
-	{
+	if (count == 1) {
 		g_clientprefs[clients[0]][SAYSOUND_PREF_BANNED] = !g_clientprefs[clients[0]][SAYSOUND_PREF_BANNED];
-		ReplyToCommand(client, "[sm] %N ban status set to: %s", clients[0], g_clientprefs[clients[0]][SAYSOUND_PREF_BANNED] ? "banned" : "unbanned");
-		
-		StoreClientCookies(clients[0]);
+		ReplyToCommand(client, "[SM] %N ban status set to: %s", clients[0], g_clientprefs[clients[0]][SAYSOUND_PREF_BANNED] ? "banned" : "unbanned");
 	}
-	else
-	{
+	else {
 		ReplyToTargetError(client, count);
 	}
 
 	return Plugin_Handled;
 }
 
-public void SaysoundClientPref(int client, CookieMenuAction action, any info, char[] buffer, maxlen)
-{
-	if (action == CookieMenuAction_SelectOption)
-	{
-		ShowClientPrefMenu(client);
-	}
-}
-
-ShowClientPrefMenu(int client)
-{
-	Handle menu = CreateMenu(MenuHandlerClientPref);
-
-	SetMenuTitle(menu, "Saysounds\n ");
-
-	AddMenuItem(menu, "", g_clientprefs[client][SAYSOUND_PREF_DISABLED] ? "Saysounds: Disabled" : "Saysounds: Enabled");
-
-	SetMenuExitButton(menu, true);
-
-	DisplayMenu(menu, client, 0);
-}
-
-public void MenuHandlerClientPref(Handle menu, MenuAction action, int param1, int param2)
-{
-	if(action == MenuAction_Select)	
-	{
-		if (param2 == 0)
-		{
-			g_clientprefs[param1][SAYSOUND_PREF_DISABLED] = !g_clientprefs[param1][SAYSOUND_PREF_DISABLED];
-		}
-		ShowClientPrefMenu(param1);
-	} 
-	else if(action == MenuAction_End)
-	{
-		CloseHandle(menu);
-	}
-}
-
-public Action Command_Sound_Toggle(int client, int args)
-{
-	if(client && IsClientInGame(client))
-	{
-		g_clientprefs[client][SAYSOUND_PREF_DISABLED]  = ! g_clientprefs[client][SAYSOUND_PREF_DISABLED];
-		PrintToChat(client, "[SM] %s", g_clientprefs[client][SAYSOUND_PREF_DISABLED] ? "saysounds disabled" : "saysounds enabled");
+public Action Command_Sound_Toggle(int client, int args) {
+	if(IsValidClient(client)) {
+		BasePlayer player = BasePlayer(client);
+		player.bSoundDisabled = !player.bSoundDisabled;
+		PrintToChat(client, "[SM] %s", player.bSoundDisabled ? "Saysounds disabled" : "Saysounds enabled");
 	}
 
 	return Plugin_Handled;
@@ -715,56 +664,18 @@ public Action Command_Sound_Toggle(int client, int args)
 
 public Action Command_Sound_Menu(client, args)
 {
-	if(client && IsClientInGame(client))
-	{
-		if(g_access[client] == SAYSOUND_ADMIN)
+	if(IsValidClient(client)) {
+		/*if(g_access[client] == SAYSOUND_ADMIN)
 		{
 			DisplayMenu(gh_adminmenu, client, 60);
 		}
 		else
 		{
 			DisplayMenu(gh_menu, client, 60);
-		}
+		}*/
 	}
 
 	return Plugin_Handled;
-}
-
-public menu_handler(Handle menu, MenuAction action, int client, int selection)
-{
-	if(action==MenuAction_Select)
-	{
-		char SelectionInfo[SAYSOUND_TRIGGER_SIZE];
-		if (GetMenuItem(menu,selection,SelectionInfo,sizeof(SelectionInfo)))
-		{
-			if(gb_enabled && !g_clientprefs[client][SAYSOUND_PREF_DISABLED] && !g_clientprefs[client][SAYSOUND_PREF_BANNED])		// enabled, they can emit sounds to others
-			{
-				AttemptSaySound(client, SelectionInfo);
-			}
-		}
-	}
-}
-
-public OnAdminMenuReady(Handle topmenu)
-{
-	if (topmenu != hAdminMenu)
-	{
-		hAdminMenu = topmenu;
-		TopMenuObject server_commands = FindTopMenuCategory(hAdminMenu, ADMINMENU_SERVERCOMMANDS);
-		AddToTopMenu(hAdminMenu, "sm_soundlist", TopMenuObject_Item, Play_Admin_Sound, server_commands, "sm_soundlist", ADMFLAG_GENERIC);
-	}
-}
-
-public Play_Admin_Sound(Handle topmenu, TopMenuAction action, TopMenuObject object_id, param, char[] buffer, int maxlength)
-{
-	if (action == TopMenuAction_DisplayOption)
-	{
-		Format(buffer, maxlength, "Play A Saysound");
-	}
-	else if (action == TopMenuAction_SelectOption)
-	{
-		Command_Sound_Menu(param, 0);
-	}
 }
 
 stock bool IsValidClient(int clientIdx, bool isPlayerAlive = false) {
