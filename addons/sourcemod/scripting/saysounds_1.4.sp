@@ -82,7 +82,7 @@ Handle gh_menu, gh_adminmenu;
 Handle hAdminMenu = INVALID_HANDLE;
 
 methodmap BasePlayer {
-	public SaysoundClient(const int ind, bool uid=false) {
+	public BasePlayer(const int ind, bool uid=false) {
 		int player=0;	// If you're using a userid and you know 100% it's valid, then set uid to true
 		if( uid && GetClientOfUserId(ind) > 0 )
 			player = (ind);
@@ -358,6 +358,8 @@ public void PrecacheSounds() {
 }
 
 public void PrepareSounds() {
+	if(m_aSoundList != null)
+		delete m_aSoundList;
 	m_aSoundList = new ArrayList(sizeof(SoundStruct));
 
 	char soundListFile[PLATFORM_MAX_PATH];
