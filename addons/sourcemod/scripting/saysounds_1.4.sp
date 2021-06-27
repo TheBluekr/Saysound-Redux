@@ -1,9 +1,3 @@
-/**
- To-do:
- - Fix Admin menu integration
-*/
-
-
 #include <sourcemod>
 #include <sdktools>
 #include <clientprefs>
@@ -77,6 +71,8 @@ ArrayList m_aUserSerial;
 ArrayList m_aSoundList;
 
 bool bLameSoundEngine;
+
+TopMenu m_hAdminMenu = null;
 
 methodmap BasePlayer {
 	public BasePlayer(const int ind, bool uid=false) {
@@ -249,23 +245,18 @@ public void OnPluginStart() {
 	m_hCookies[CookieSoundBanned] = new Cookie("saysounds_banned", "Whether saysound is allowed for client", CookieAccess_Protected);
 	m_hCookies[CookieSoundCount] = new Cookie("saysounds_count", "How many sounds client has used", CookieAccess_Protected);
 	
-	//m_hCookies[CookieSoundDisabled].SetPrefabMenu(CookieMenu_YesNo, "Enable Saysounds sounds", SaysoundClientPref);
+	m_hCookies[CookieSoundDisabled].SetPrefabMenu(CookieMenu_YesNo, "Enable Saysounds sounds");
 
-	//RegAdminCmd("sm_sound_ban", Command_Sound_Ban, ADMFLAG_BAN, "sm_sound_ban <user> : Bans a player from using sounds");
-	//RegAdminCmd("sm_sound_reset", Command_Sound_Reset, ADMFLAG_GENERIC, "sm_sound_reset <user | all> : Resets sound quota for user, or everyone if all");
-	//RegConsoleCmd("sm_soundlist", Command_Sound_Menu, "Display a menu sounds to play");
-	//RegConsoleCmd("sm_sounds", Command_Sound_Toggle, "Toggle Saysounds");
+	RegAdminCmd("sm_sound_ban", Command_Sound_Ban, ADMFLAG_BAN, "sm_sound_ban <user> : Bans a player from using sounds");
+	RegAdminCmd("sm_sound_reset", Command_Sound_Reset, ADMFLAG_GENERIC, "sm_sound_reset <user | all> : Resets sound quota for user, or everyone if all");
+	RegConsoleCmd("sm_soundlist", Command_Sound_Menu, "Display a menu sounds to play");
+	RegConsoleCmd("sm_sounds", Command_Sound_Toggle, "Toggle Saysounds");
 
 	AddCommandListener(Command_Say, "say");
 	AddCommandListener(Command_Say, "say2");
 	AddCommandListener(Command_Say, "say_team");
 
 	HookEvent("teamplay_round_start", Event_RoundStart);
-
-	/*Handle topmenu;
-	if (LibraryExists("adminmenu") && ((topmenu = GetAdminTopMenu()) != INVALID_HANDLE)) {
-		OnAdminMenuReady(topmenu);
-	}*/
 
 	PrepareSounds();
 	
@@ -274,6 +265,22 @@ public void OnPluginStart() {
 			OnClientPutInServer(i);
 		}
 	}
+
+	TopMenu topmenu;
+	if(LibraryExists("adminmenu") && ((topmenu = GetAdminTopMenu()) != null))
+		OnAdminMenuReady(topmenu);
+}
+
+public void OnLibraryRemoved(const char[] name) {
+	if(StrEqual(name, "adminmenu", false)) {
+		m_hAdminMenu = null;
+	}
+}
+
+public void OnMapStart() {
+	ResetClients();
+
+	PrecacheSounds();
 }
 
 public void OnClientPutInServer(int client) {
@@ -288,8 +295,10 @@ public void OnClientPutInServer(int client) {
 	m_hPlayerFields[client].SetValue("bSoundBanned", false);
 	m_hPlayerFields[client].SetValue("iSoundCount", 0);
 
-	if(!m_aUserSerial.FindValue(GetClientUserId(client)))
+	if(!m_aUserSerial.FindValue(GetClientUserId(client))) {
 		player.iSoundCount = 0;	/// Sound count has reset but user wasn't connected, let's reset now
+		m_aUserSerial.Push(GetClientUserId(client));
+	}
 
 	if(CheckCommandAccess(client, "saysounds_admin", ADMFLAG_CHAT, true))
 		player.iAccessType = SAYSOUND_ADMIN;
@@ -298,12 +307,6 @@ public void OnClientPutInServer(int client) {
 	else
 		player.iAccessType = SAYSOUND_CLIENT;
 	player.fSoundLastTime = 0.0;
-}
-
-public void OnMapStart() {
-	ResetClients();
-
-	PrecacheSounds();
 }
 
 public void ResetClients() {
@@ -368,12 +371,6 @@ public void PrepareSounds() {
 		kv.ImportFromFile(soundListFile);
 		kv.Rewind();
 		if(kv.GotoFirstSubKey()) {
-			/*gh_menu = CreateMenu(menu_handler);
-			gh_adminmenu = CreateMenu(menu_handler);
-			
-			SetMenuTitle(gh_menu, "Saysounds\n ");
-			SetMenuTitle(gh_adminmenu, "Saysounds\n ");*/
-
 			while(kv.GotoNextKey()) {
 				char filelocation[PLATFORM_MAX_PATH];
 				kv.GetString("file", filelocation, sizeof(filelocation), "");
@@ -387,12 +384,6 @@ public void PrepareSounds() {
 					if(kv.GetNum("admin", 0)) {
 						file.flags |= SAYSOUND_FLAG_ADMIN;
 					}
-						/*AddMenuItem(gh_adminmenu, trigger, trigger);
-					}
-					else {
-						AddMenuItem(gh_adminmenu, trigger, trigger);
-						AddMenuItem(gh_menu, trigger, trigger);
-					}*/
 
 					if(kv.GetNum("download", 1))
 						file.flags |= SAYSOUND_FLAG_DOWNLOAD;
@@ -417,7 +408,7 @@ public void PrepareSounds() {
 
 					for(int i = 2; i; i++) {
 						char item[8];
-						FormatEx(item, sizeof(item),  "file%d", i);
+						FormatEx(item, sizeof(item), "file%d", i);
 						kv.GetString(item, filelocation, sizeof(filelocation), "");
 						if(filelocation[0] == '\0') {
 							break;
@@ -517,7 +508,7 @@ public Action AttemptSaySound(int client, char[] sound) {
 				SoundStruct recentfile;
 				for(int j; j < m_aRecentSounds.Length; j++) {
 					m_aRecentSounds.GetArray(j, recentfile);
-					if(IsSoundEqual(soundfile, recentfile)) {
+					if(IsSoundStructEqual(soundfile, recentfile)) {
 						switch(player.iAccessType) {
 							case SAYSOUND_CLIENT:
 								if(CvarExcludeClient.BoolValue) {
@@ -613,12 +604,12 @@ public Action Command_Sound_Reset(int client, int args) {
 	GetCmdArg(1, arg, sizeof(arg));	
 
 	char name[64];
-	bool isml,clients[MAXPLAYERS+1];
-	int count=ProcessTargetString(arg,client,clients,MAXPLAYERS+1,COMMAND_FILTER_CONNECTED|COMMAND_FILTER_NO_BOTS,name,sizeof(name),isml);
+	bool isml, targets[MAXPLAYERS];
+	int count = ProcessTargetString(arg, client, targets, MAXPLAYERS, COMMAND_FILTER_CONNECTED|COMMAND_FILTER_NO_BOTS, name, sizeof(name), isml);
 	if(count > 0) {
 		BasePlayer player;
 		for(int i = 0; i < count; i++) {
-			player = BasePlayer(i);
+			player = BasePlayer(targets[i]);
 			player.iSoundCount = 0;
 			player.DisplayRemainingSounds();
 		}
@@ -639,18 +630,15 @@ public Action Command_Sound_Ban(int client, int args) {
 	char arg[64];
 	GetCmdArg(1, arg, sizeof(arg));	
 
-	char name[64];
-	bool isml, targets[MAXPLAYERS+1];
-	int count = ProcessTargetString(arg, client, targets, MAXPLAYERS+1, COMMAND_FILTER_CONNECTED|COMMAND_FILTER_NO_BOTS|COMMAND_FILTER_NO_MULTI, name, sizeof(name), isml);
-	if(count == 1) {
-		BasePlayer player = BasePlayer(targets[0]);
+	int target = FindTarget(client, arg);
+	if(IsValidClient(target)) {
+		BasePlayer player = BasePlayer(target);
 		player.bSoundBanned = !player.bSoundBanned;
 		ReplyToCommand(client, "[SM] %N ban status set to: %s", player.index, player.bSoundBanned ? "banned" : "unbanned");
 	}
 	else {
-		ReplyToTargetError(client, count);
+		ReplyToCommand(client, "[SM] Invalid target");
 	}
-
 	return Plugin_Handled;
 }
 
@@ -664,20 +652,51 @@ public Action Command_Sound_Toggle(int client, int args) {
 	return Plugin_Handled;
 }
 
-public Action Command_Sound_Menu(client, args)
+public Action Command_Sound_Menu(int client, int args)
 {
 	if(IsValidClient(client)) {
-		/*if(g_access[client] == SAYSOUND_ADMIN)
-		{
-			DisplayMenu(gh_adminmenu, client, 60);
+		BasePlayer player = BasePlayer(client);
+		Menu menu = new Menu(SaysoundMenuHandler);
+		menu.SetTitle("Saysounds\n ");
+		menu.ExitButton = false;
+		SoundStruct soundfile;
+		for(int i; i < m_aSoundList.Length; i++) {
+			m_aSoundList.GetArray(i, soundfile);
+			if((soundfile.flags & SAYSOUND_FLAG_ADMIN) && player.iAccessType != SAYSOUND_ADMIN)
+				continue;
+			menu.AddItem(soundfile.trigger, soundfile.trigger);
 		}
-		else
-		{
-			DisplayMenu(gh_menu, client, 60);
-		}*/
+		menu.Display(client, 60);
 	}
-
 	return Plugin_Handled;
+}
+
+public int SaysoundMenuHandler(Menu menu, MenuAction action, int param1, int param2) {
+	if(action == MenuAction_Select) {
+		char SelectionInfo[SAYSOUND_TRIGGER_SIZE];
+		if(menu.GetItem(param2, SelectionInfo, sizeof(SelectionInfo))) {
+			BasePlayer player = BasePlayer(param1);
+			if(CvarEnabled.BoolValue && !player.bSoundDisabled && !player.bSoundBanned)	// enabled, they can emit sounds to others
+				AttemptSaySound(param1, SelectionInfo);
+		}
+	}
+}
+
+public void OnAdminMenuReady(Handle hTopMenu) {
+	TopMenu topmenu = TopMenu.FromHandle(hTopMenu);
+	if(topmenu == m_hAdminMenu)
+		return;
+	TopMenuObject servercommands = FindTopMenuCategory(m_hAdminMenu, ADMINMENU_SERVERCOMMANDS);
+	AddToTopMenu(m_hAdminMenu, "sm_soundlist", TopMenuObject_Item, Play_Admin_Sound, servercommands, "sm_soundlist", ADMFLAG_GENERIC);
+}
+
+public void Play_Admin_Sound(TopMenu topmenu, TopMenuAction action, TopMenuObject object_id, int param, char[] buffer, int maxlength) {
+	if(action == TopMenuAction_DisplayOption) {
+		Format(buffer, maxlength, "Play A Saysound");
+	}
+	else if(action == TopMenuAction_SelectOption) {
+		Command_Sound_Menu(param, 0);
+	}
 }
 
 stock bool IsValidClient(int clientIdx, bool isPlayerAlive = false) {
@@ -688,7 +707,7 @@ stock bool IsValidClient(int clientIdx, bool isPlayerAlive = false) {
 	return IsClientInGame(clientIdx);
 }
 
-stock bool IsSoundEqual(SoundStruct struct1, SoundStruct struct2) {	/// Bit overengineered, but Sourcemod doesn't inherently support comparing enum structs (or C for the same matter on structs...)
+stock bool IsSoundStructEqual(SoundStruct struct1, SoundStruct struct2) {	/// Bit overengineered, but Sourcemod doesn't inherently support comparing enum structs (or C for the same matter on structs...)
 	char path1buffer[PLATFORM_MAX_PATH], path2buffer[PLATFORM_MAX_PATH];
 	ArrayList path1 = struct1.paths;
 	ArrayList path2 = struct2.paths;
